@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pixel Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; }
+        canvas { image-rendering: pixelated; }
+        #ui { position: fixed; top: 10px; left: 10px; color: white; font-family: Arial; }
+        #menu { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+                background: rgba(0,0,0,0.8); padding: 20px; color: white; text-align: center; }
+        button { background: #4CAF50; border: none; padding: 10px 20px; color: white; cursor: pointer; }
+    </style>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+</head>
+<body>
+    <div id="ui">
+        Score: <span id="score">0</span> | 
+        High Score: <span id="highscore">0</span>
+    </div>
+    <div id="menu">
+        <h1>Pixel Platformer</h1>
+        <button onclick="startGame()">Single Player</button>
+        <button onclick="startMultiplayer()">Multiplayer</button>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+// Firebase Configuration (Replace with your own)
+const firebaseConfig = {
+    apiKey: "AIzaSyAJS266hDJsUQhgmP9_2Ey0pdnfxOF25HQ",
+    authDomain: "pixel-platformer-7e246.firebaseapp.com",
+    projectId: "pixel-platformer-7e246",
+    storageBucket: "pixel-platformer-7e246.firebasestorage.app",
+    messagingSenderId: "684699261546",
+    appId: "1:684699261546:web:a9037e0026d2811c61c813"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Game Constants
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 1280;
+canvas.height = 720;
+
+// Game State
+let player = {
+    x: 100,
+    y: 500,
+    width: 32,
+    height: 48,
+    velocityY: 0,
+    grounded: false,
+    score: 0
+};
+
+let platforms = [];
+let coins = [];
+let otherPlayers = {};
+
+// Initialize Level
+function createLevel() {
+    platforms = [
+        { x: 0, y: 600, width: 400, height: 20 },
+        { x: 500, y: 500, width: 200, height: 20 },
+        { x: 800, y: 400, width: 200, height: 20 }
+    ];
+
+    coins = [];
+    for(let i = 0; i < 10; i++) {
+        coins.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height - 100,
+            collected: false
+        });
+    }
+}
+
+// Physics
+const gravity = 0.5;
+const moveSpeed = 5;
+const jumpForce = -12;
+
+// Input Handling
+const keys = {};
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+// Game Loop
+function update() {
+    // Movement
+    if(keys['ArrowLeft']) player.x -= moveSpeed;
+    if(keys['ArrowRight']) player.x += moveSpeed;
+    
+    if(keys['Space'] && player.grounded) {
+        player.velocityY = jumpForce;
+        player.grounded = false;
+    }
+
+    // Apply gravity
+    player.velocityY += gravity;
+    player.y += player.velocityY;
+
+    // Platform collisions
+    player.grounded = false;
+    platforms.forEach(platform => {
+        if(checkCollision(player, platform)) {
+            player.velocityY = 0;
+            player.grounded = true;
+            player.y = platform.y - player.height;
+        }
+    });
+
+    // Coin collection
+    coins.forEach(coin => {
+        if(!coin.collected && checkCollision(player, coin)) {
+            coin.collected = true;
+            player.score += 10;
+            document.getElementById('score').textContent = player.score;
+        }
+    });
+
+    // Update UI
+    if(player.score > localStorage.highscore) {
+        localStorage.highscore = player.score;
+        document.getElementById('highscore').textContent = player.score;
+    }
+}
+
+function draw() {
+    // Clear canvas
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw platforms
+    ctx.fillStyle = '#4a3728';
+    platforms.forEach(platform => {
+        ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    });
+
+    // Draw coins
+    coins.forEach(coin => {
+        if(!coin.collected) {
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(coin.x + 8, coin.y + 8, 8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+
+    // Draw player
+    ctx.fillStyle = '#FF4444';
+    ctx.fillRect(player.x, player.y, player.width, player.height);
+
+    // Draw other players
+    Object.values(otherPlayers).forEach(p => {
+        ctx.fillStyle = '#4444FF';
+        ctx.fillRect(p.x, p.y, p.width, p.height);
+    });
+}
+
+// Multiplayer Functions
+let gameSessionId = null;
+
+async function startMultiplayer() {
+    document.getElementById('menu').style.display = 'none';
+    gameSessionId = Date.now().toString();
+    player.id = gameSessionId;
+    
+    // Sync with Firestore
+    db.collection('games').doc(gameSessionId).set(player);
+    
+    db.collection('games').onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+            if(change.doc.id !== gameSessionId) {
+                otherPlayers[change.doc.id] = change.doc.data();
+            }
+        });
+    });
+}
+
+// Helper Functions
+function checkCollision(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.width &&
+           rect1.x + rect1.width > rect2.x &&
+           rect1.y < rect2.y + rect2.height &&
+           rect1.y + rect1.height > rect2.y;
+}
+
+function startGame() {
+    document.getElementById('menu').style.display = 'none';
+    localStorage.highscore = localStorage.highscore || 0;
+    document.getElementById('highscore').textContent = localStorage.highscore;
+    createLevel();
+    
+    function gameLoop() {
+        update();
+        draw();
+        if(gameSessionId) {
+            db.collection('games').doc(gameSessionId).update(player);
+        }
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+}
+
+// Prevent spacebar scrolling
+window.addEventListener('keydown', function(e) {
+    if(e.key === ' ' && e.target === document.body) {
+        e.preventDefault();
+    }
+});
+</script>
+</body>
+</html>
