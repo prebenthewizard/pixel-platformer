@@ -4,14 +4,56 @@
     <meta charset="UTF-8">
     <title>Pixel Platformer</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #1a1a1a; }
-        canvas { image-rendering: pixelated; }
-        #ui { position: fixed; top: 10px; left: 10px; color: white; font-family: Arial; }
-        #menu { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                background: rgba(0,0,0,0.8); padding: 20px; color: white; text-align: center; }
-        button { background: #4CAF50; border: none; padding: 10px 20px; color: white; cursor: pointer; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: linear-gradient(#87CEEB, #E0F6FF);
+        }
+        canvas { 
+            image-rendering: crisp-edges;
+            position: fixed;
+            top: 0;
+            left: 0;
+            display: none; /* Skjult indtil spilstart */
+        }
+        #ui { 
+            position: fixed; 
+            top: 10px; 
+            left: 10px; 
+            color: #FFF; 
+            text-shadow: 2px 2px #000;
+            font-family: 'Courier New', monospace; 
+            font-size: 20px;
+            z-index: 1001;
+        }
+        #menu { 
+            position: fixed; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            background: linear-gradient(45deg, #2c3e50, #3498db);
+            padding: 30px 50px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            color: white; 
+            text-align: center;
+            z-index: 1000;
+        }
+        button { 
+            background: #4CAF50; 
+            border: none; 
+            padding: 15px 30px; 
+            color: white; 
+            cursor: pointer; 
+            margin: 10px;
+            border-radius: 8px;
+            font-size: 18px;
+            transition: transform 0.2s;
+        }
+        button:hover { 
+            transform: scale(1.1); 
+        }
     </style>
-    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
 </head>
@@ -28,7 +70,6 @@
     <canvas id="gameCanvas"></canvas>
 
 <script>
-// Firebase Configuration (Replace with your own)
 const firebaseConfig = {
     apiKey: "AIzaSyAJS266hDJsUQhgmP9_2Ey0pdnfxOF25HQ",
     authDomain: "pixel-platformer-7e246.firebaseapp.com",
@@ -42,13 +83,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// Game Constants
+// Game setup
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 canvas.width = 1280;
 canvas.height = 720;
 
-// Game State
 let player = {
     x: 100,
     y: 500,
@@ -62,42 +102,47 @@ let player = {
 let platforms = [];
 let coins = [];
 let otherPlayers = {};
+let gameSessionId = null;
 
-// Initialize Level
 function createLevel() {
     platforms = [
-        { x: 0, y: 600, width: 400, height: 20 },
-        { x: 500, y: 500, width: 200, height: 20 },
-        { x: 800, y: 400, width: 200, height: 20 }
+        { x: 0, y: 600, width: 300, height: 40, color: '#2ecc71' },
+        { x: 350, y: 500, width: 250, height: 40, color: '#e74c3c' },
+        { x: 150, y: 400, width: 200, height: 40, color: '#9b59b6' },
+        { x: 500, y: 300, width: 300, height: 40, color: '#f1c40f' }
     ];
 
     coins = [];
-    for(let i = 0; i < 10; i++) {
-        coins.push({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height - 100,
-            collected: false
-        });
-    }
+    platforms.forEach(platform => {
+        for(let i = 0; i < 3; i++) {
+            coins.push({
+                x: platform.x + 20 + (i * 70),
+                y: platform.y - 50,
+                radius: 10,
+                collected: false,
+                animation: 0
+            });
+        }
+    });
 }
 
-// Physics
-const gravity = 0.5;
-const moveSpeed = 5;
-const jumpForce = -12;
-
-// Input Handling
+// Input handling
 const keys = {};
 document.addEventListener('keydown', e => keys[e.key] = true);
 document.addEventListener('keyup', e => keys[e.key] = false);
 
-// Game Loop
+// Game physics
+const gravity = 0.5;
+const moveSpeed = 5;
+const jumpForce = -12;
+
 function update() {
-    // Movement
+    // Horizontal movement
     if(keys['ArrowLeft']) player.x -= moveSpeed;
     if(keys['ArrowRight']) player.x += moveSpeed;
-    
-    if(keys['Space'] && player.grounded) {
+
+    // Jumping
+    if(keys[' '] && player.grounded) {
         player.velocityY = jumpForce;
         player.grounded = false;
     }
@@ -109,23 +154,32 @@ function update() {
     // Platform collisions
     player.grounded = false;
     platforms.forEach(platform => {
-        if(checkCollision(player, platform)) {
-            player.velocityY = 0;
+        if(player.x < platform.x + platform.width &&
+           player.x + player.width > platform.x &&
+           player.y + player.height > platform.y &&
+           player.y + player.height < platform.y + 20) {
             player.grounded = true;
+            player.velocityY = 0;
             player.y = platform.y - player.height;
         }
     });
 
     // Coin collection
     coins.forEach(coin => {
-        if(!coin.collected && checkCollision(player, coin)) {
-            coin.collected = true;
-            player.score += 10;
-            document.getElementById('score').textContent = player.score;
+        if(!coin.collected) {
+            const dx = (player.x + player.width/2) - coin.x;
+            const dy = (player.y + player.height/2) - coin.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            
+            if(distance < 20) {
+                coin.collected = true;
+                player.score += 10;
+                document.getElementById('score').textContent = player.score;
+            }
         }
     });
 
-    // Update UI
+    // Update high score
     if(player.score > localStorage.highscore) {
         localStorage.highscore = player.score;
         document.getElementById('highscore').textContent = player.score;
@@ -138,8 +192,8 @@ function draw() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw platforms
-    ctx.fillStyle = '#4a3728';
     platforms.forEach(platform => {
+        ctx.fillStyle = platform.color;
         ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
     });
 
@@ -148,7 +202,13 @@ function draw() {
         if(!coin.collected) {
             ctx.fillStyle = '#FFD700';
             ctx.beginPath();
-            ctx.arc(coin.x + 8, coin.y + 8, 8, 0, Math.PI * 2);
+            ctx.arc(
+                coin.x,
+                coin.y - Math.sin(coin.animation) * 5,
+                coin.radius,
+                0,
+                Math.PI * 2
+            );
             ctx.fill();
         }
     });
@@ -156,58 +216,59 @@ function draw() {
     // Draw player
     ctx.fillStyle = '#FF4444';
     ctx.fillRect(player.x, player.y, player.width, player.height);
-
-    // Draw other players
-    Object.values(otherPlayers).forEach(p => {
-        ctx.fillStyle = '#4444FF';
-        ctx.fillRect(p.x, p.y, p.width, p.height);
-    });
 }
 
-// Multiplayer Functions
-let gameSessionId = null;
-
-async function startMultiplayer() {
-    document.getElementById('menu').style.display = 'none';
-    gameSessionId = Date.now().toString();
-    player.id = gameSessionId;
-    
-    // Sync with Firestore
-    db.collection('games').doc(gameSessionId).set(player);
-    
-    db.collection('games').onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(change => {
-            if(change.doc.id !== gameSessionId) {
-                otherPlayers[change.doc.id] = change.doc.data();
-            }
-        });
-    });
-}
-
-// Helper Functions
-function checkCollision(rect1, rect2) {
-    return rect1.x < rect2.x + rect2.width &&
-           rect1.x + rect1.width > rect2.x &&
-           rect1.y < rect2.y + rect2.height &&
-           rect1.y + rect1.height > rect2.y;
-}
-
+// Game controls
 function startGame() {
     document.getElementById('menu').style.display = 'none';
+    canvas.style.display = 'block';
     localStorage.highscore = localStorage.highscore || 0;
     document.getElementById('highscore').textContent = localStorage.highscore;
     createLevel();
-    
+
     function gameLoop() {
         update();
         draw();
-        if(gameSessionId) {
-            db.collection('games').doc(gameSessionId).update(player);
-        }
         requestAnimationFrame(gameLoop);
     }
     gameLoop();
 }
+
+async function startMultiplayer() {
+    document.getElementById('menu').style.display = 'none';
+    canvas.style.display = 'block';
+    gameSessionId = Date.now().toString();
+    player.id = gameSessionId;
+    
+    await db.collection('games').doc(gameSessionId).set(player);
+    
+    db.collection('games').onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+            const data = change.doc.data();
+            if(change.doc.id !== gameSessionId) {
+                otherPlayers[change.doc.id] = data;
+            }
+        });
+    });
+
+    window.addEventListener('beforeunload', () => {
+        db.collection('games').doc(gameSessionId).delete();
+    });
+
+    function gameLoop() {
+        update();
+        draw();
+        db.collection('games').doc(gameSessionId).update(player);
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+}
+
+// Initial setup
+window.onload = () => {
+    document.getElementById('menu').style.display = 'block';
+    document.getElementById('highscore').textContent = localStorage.highscore || 0;
+};
 
 // Prevent spacebar scrolling
 window.addEventListener('keydown', function(e) {
